@@ -53,7 +53,8 @@ def _tensorrt_version():
 
 class TensorRTBackendRep(BackendRep):
     def __init__(self, model, device, max_batch_size=32,
-                 max_workspace_size=None, serialize_engine=True, **kwargs):
+                 max_workspace_size=None, serialize_engine=True,
+                 dtype=None, **kwargs):
         if not isinstance(device, Device):
             device = Device(device)
         self._set_device(device)
@@ -76,6 +77,11 @@ class TensorRTBackendRep(BackendRep):
             max_workspace_size = 1 << 28
         self.builder.set_max_batch_size(max_batch_size)
         self.builder.set_max_workspace_size(max_workspace_size)
+        if dtype is not None:
+            if dtype not in [np.float16, np.float32]:
+                raise ValueError("Unsupported data type:", dtype)
+            if self.builder.platform_has_fast_fp16():
+                self.builder.set_fp16_mode(dtype == np.float16)
         trt_engine = self.builder.build_cuda_engine(self.network)
         if trt_engine is None:
             raise RuntimeError("Failed to build TensorRT engine from network")
