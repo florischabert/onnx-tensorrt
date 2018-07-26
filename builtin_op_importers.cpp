@@ -23,6 +23,7 @@
 #include "builtin_op_importers.hpp"
 #include "onnx2trt_utils.hpp"
 #include "plugin.hpp"
+#include "Crop.hpp"
 #include "FancyActivation.hpp"
 #include "ResizeNearest.hpp"
 #include "Split.hpp"
@@ -680,6 +681,28 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   }
 #endif // NV_TENSORRT_MAJOR >= 4
   return {{tensor_ptr}};
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Crop) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+  OnnxAttrs attrs(node);
+  int height_scale, width_scale;
+  if( !attrs.count("scale") ) {
+    height_scale = 1;
+    width_scale  = 1;
+  } else {
+    auto scale = attrs.get<std::vector<int>>("scale");
+    ASSERT(scale.size() == 2, ErrorCode::kUNSUPPORTED_NODE);
+    height_scale = scale[0];
+    width_scale  = scale[1];
+  }
+  auto scale = {height_scale, width_scale};
+  auto border = attrs.get<std::vector<int>>("border");
+  ASSERT(border.size() == 4, ErrorCode::kUNSUPPORTED_NODE);
+  RETURN_FIRST_OUTPUT(ctx->addPlugin(new CropPlugin(border, scale),
+                                     {&inputs.at(0).tensor()}));
 }
 
 #if NV_TENSORRT_MAJOR >= 4
