@@ -700,12 +700,12 @@ DEFINE_BUILTIN_OP_IMPORTER(Crop) {
   }
   auto border = attrs.get<std::vector<int>>("border");
   ASSERT(border.size() == 4, ErrorCode::kUNSUPPORTED_NODE);
-  beg_padding.h() = - border[1] * height_scale;
-  beg_padding.w() = - border[0] * width_scale;
-  end_padding.h() = border[3] * height_scale - dims.d[dims.nbDims - 2];
-  end_padding.w() = border[2] * width_scale - dims.d[dims.nbDims - 1];
+  pre_crop.h() = border[1] * height_scale;
+  pre_crop.w() = border[0] * width_scale;
+  post_crop.h() = dims.d[dims.nbDims - 2] - border[3] * height_scale;
+  post_crop.w() = dims.d[dims.nbDims - 1] - border[2] * width_scale;
   RETURN_FIRST_OUTPUT(
-    ctx->network()->addPadding(tensor, beg_padding, end_padding));
+    ctx->network()->addPadding(tensor, - pre_crop, - post_crop));
 }
 
 #if NV_TENSORRT_MAJOR >= 4
