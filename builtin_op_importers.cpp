@@ -686,7 +686,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Crop) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();
   nvinfer1::Dims dims = tensor.getDimensions();
-  nvinfer1::DimsHW beg_padding, end_padding;
   OnnxAttrs attrs(node);
   int height_scale, width_scale;
   if( !attrs.count("scale") ) {
@@ -700,6 +699,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Crop) {
   }
   auto border = attrs.get<std::vector<int>>("border");
   ASSERT(border.size() == 4, ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::DimsHW pre_crop, post_crop;
   pre_crop.h() = border[1] * height_scale;
   pre_crop.w() = border[0] * width_scale;
   post_crop.h() = dims.d[dims.nbDims - 2] - border[3] * height_scale;
