@@ -23,7 +23,6 @@
 #include "builtin_plugins.hpp"
 #include "plugin.hpp"
 #include "PluginFactory.hpp"
-#include "Crop.hpp"
 #include "FancyActivation.hpp"
 #include "ResizeNearest.hpp"
 #include "Split.hpp"
@@ -70,7 +69,6 @@ static bool registerBuiltinPlugin(const char* plugin_type,
       registerBuiltinPlugin(plugin_type_string, _build_##PluginClass); \
   IGNORE_UNUSED_GLOBAL(_registered_##PluginClass)
 
-REGISTER_BUILTIN_PLUGIN("Crop"         ,         CropPlugin);
 REGISTER_BUILTIN_PLUGIN("FancyActivation",       FancyActivationPlugin);
 REGISTER_BUILTIN_PLUGIN("ResizeNearest",         ResizeNearestPlugin);
 REGISTER_BUILTIN_PLUGIN("Split"        ,         SplitPlugin);

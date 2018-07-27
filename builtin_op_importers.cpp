@@ -23,7 +23,6 @@
 #include "builtin_op_importers.hpp"
 #include "onnx2trt_utils.hpp"
 #include "plugin.hpp"
-#include "Crop.hpp"
 #include "FancyActivation.hpp"
 #include "ResizeNearest.hpp"
 #include "Split.hpp"
@@ -686,7 +685,8 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
 DEFINE_BUILTIN_OP_IMPORTER(Crop) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();
-  ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::Dims dims = tensor.getDimensions();
+  nvinfer1::DimsHW beg_padding, end_padding;
   OnnxAttrs attrs(node);
   int height_scale, width_scale;
   if( !attrs.count("scale") ) {
@@ -698,11 +698,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Crop) {
     height_scale = scale[0];
     width_scale  = scale[1];
   }
-  auto scale = {height_scale, width_scale};
   auto border = attrs.get<std::vector<int>>("border");
   ASSERT(border.size() == 4, ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(ctx->addPlugin(new CropPlugin(border, scale),
-                                     {&inputs.at(0).tensor()}));
+  beg_padding.h() = - border[1] * height_scale;
+  beg_padding.w() = - border[0] * width_scale;
+  end_padding.h() = border[3] * height_scale - dims.d[dims.nbDims - 2];
+  end_padding.w() = border[2] * width_scale - dims.d[dims.nbDims - 1];
+  RETURN_FIRST_OUTPUT(
+    ctx->network()->addPadding(tensor, beg_padding, end_padding));
 }
 
 #if NV_TENSORRT_MAJOR >= 4
