@@ -54,6 +54,8 @@ set(PLUGIN_SOURCES
   ResizeNearest.cu
   Split.cu
   InstanceNormalization.cpp
+  BoxExtract.cu
+  BoxMergeWithNMS.cu
   plugin.cpp
   )
 

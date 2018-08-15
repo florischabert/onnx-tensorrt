@@ -27,6 +27,8 @@
 #include "ResizeNearest.hpp"
 #include "Split.hpp"
 #include "InstanceNormalization.hpp"
+#include "BoxExtract.hpp"
+#include "BoxMergeWithNMS.hpp"
 
 namespace onnx2trt {
 
@@ -73,6 +75,8 @@ REGISTER_BUILTIN_PLUGIN("FancyActivation",       FancyActivationPlugin);
 REGISTER_BUILTIN_PLUGIN("ResizeNearest",         ResizeNearestPlugin);
 REGISTER_BUILTIN_PLUGIN("Split"        ,         SplitPlugin);
 REGISTER_BUILTIN_PLUGIN("InstanceNormalization", InstanceNormalizationPlugin);
+REGISTER_BUILTIN_PLUGIN("BoxExtract"   ,         BoxExtractPlugin);
+REGISTER_BUILTIN_PLUGIN("BoxMergeWithNMS",       BoxMergeWithNMSPlugin);
 
 REGISTER_BUILTIN_NVPLUGIN("Concat", ConcatPlugin);
 
