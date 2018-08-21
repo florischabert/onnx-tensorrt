@@ -55,7 +55,7 @@ public:
     this->deserialize(serialData, serialLength);
   }
   virtual const char* getPluginType() const override { return "BoxMergeWithNMS"; }
-  virtual int getNbOutputs() const override { return 3; }
+  virtual int getNbOutputs() const override { return 4; }
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;
   virtual int initialize() override;
