@@ -28,36 +28,48 @@
 #include <thrust/device_vector.h>
 #include <cassert>
 
-class BoxExtractPlugin final : public onnx2trt::Plugin {
+class BoxDecodePlugin final : public onnx2trt::Plugin {
   float _score_thresh;
-  int _top_n;
+  int _pre_nms_top_n;
+  float _nms_thresh;
+  int _detections_per_im;
   std::vector<float> _anchors;
+  thrust::device_vector<float> _offsets;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
     deserialize_value(&serialData, &serialLength, &_score_thresh);
-    deserialize_value(&serialData, &serialLength, &_top_n);
+    deserialize_value(&serialData, &serialLength, &_pre_nms_top_n);
+    deserialize_value(&serialData, &serialLength, &_nms_thresh);
+    deserialize_value(&serialData, &serialLength, &_detections_per_im);
     deserialize_value(&serialData, &serialLength, &_anchors);
   }
   virtual size_t getSerializationSize() override {
-    return serialized_size(_score_thresh) + serialized_size(_top_n)
+    return serialized_size(_score_thresh) + serialized_size(_pre_nms_top_n)
+      + serialized_size(_nms_thresh) + serialized_size(_detections_per_im) 
       + serialized_size(_anchors) + getBaseSerializationSize();
   }
   virtual void serialize(void *buffer) override {
     serializeBase(buffer);
     serialize_value(&buffer, _score_thresh);
-    serialize_value(&buffer, _top_n);
+    serialize_value(&buffer, _pre_nms_top_n);
+    serialize_value(&buffer, _nms_thresh);
+    serialize_value(&buffer, _detections_per_im);
     serialize_value(&buffer, _anchors);
   }
 public:
-  BoxExtractPlugin(float score_thresh, int top_n, std::vector<float> const& anchors)
-    : _score_thresh(score_thresh), _top_n(top_n), _anchors(anchors) {
-    assert(top_n >= 0);
+  BoxDecodePlugin(float score_thresh, int top_n, std::vector<float> const& anchors)
+    : _score_thresh(score_thresh), _pre_nms_top_n(pre_nms_top_n) ,_nms_thresh(nms_thresh),
+      _detections_per_im(detections_per_im), _anchors(anchors) {
+    assert(score_thresh >= 0);
+    assert(pre_nms_top_n > 0);
+    assert(nms_thresh >= 0);
+    assert(detections_per_im > 0);
   }
-  BoxExtractPlugin(void const* serialData, size_t serialLength) {
+  BoxDecodePlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
-  virtual const char* getPluginType() const override { return "BoxExtract"; }
+  virtual const char* getPluginType() const override { return "BoxDecode"; }
   virtual int getNbOutputs() const override { return 1; }
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;

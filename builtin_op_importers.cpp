@@ -27,8 +27,7 @@
 #include "ResizeNearest.hpp"
 #include "Split.hpp"
 #include "InstanceNormalization.hpp"
-#include "BoxExtract.hpp"
-#include "BoxMergeWithNMS.hpp"
+#include "BoxDecode.hpp"
 
 #include <numeric> // For std::iota
 
@@ -452,19 +451,26 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
                   combined_bias_weights, combined_scale_weights, {});
 }
 
-DEFINE_BUILTIN_OP_IMPORTER(BoxExtract) {
+DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   for( auto& input : inputs ) {
     ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   }
+  ASSERT(inputs.size() >= 3, ErrorCode::kINVALID_NODE);
+  ASSERT(inputs.size() % 2 == 1, ErrorCode::kINVALID_NODE);
 
-  nvinfer1::ITensor& scores = inputs.at(0).tensor();
+  nvinfer1::ITensor& im_info = inputs.at(0).tensor();
+  dims = im_info.getDimensions();
+  ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
+
+  nvinfer1::ITensor& scores = inputs.at(1).tensor();
   nvinfer1::Dims dims = scores.getDimensions();
-  ASSERT(dims.nbDims == 3, ErrorCode::kINVALID_NODE);
+  ASSERT(dims.nbDims >= 3, ErrorCode::kINVALID_NODE);
+
   int num_anchors_classes = dims.d[0];
   int height = dims.d[1];
   int width = dims.d[2];
 
-  nvinfer1::ITensor& boxes = inputs.at(1).tensor();
+  nvinfer1::ITensor& boxes = inputs.at(2).tensor();
   dims = boxes.getDimensions();
   int num_anchors = dims.d[0] / 4;
   int num_classes = num_anchors_classes / num_anchors;
@@ -472,36 +478,35 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxExtract) {
   ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
   ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
 
-  nvinfer1::ITensor& im_info = inputs.at(2).tensor();
-  dims = im_info.getDimensions();
-  ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
+  for( int i = 3; i < inputs.size(); i += 2 ) {
+    scores = inputs.at(i).tensor();
+    dims = scores.getDimensions();
+    ASSERT(dims.nbDims >= 3, ErrorCode::kINVALID_NODE);
+    ASSERT(dims.d[0] == num_anchors * num_classes, ErrorCode::kINVALID_NODE);
+    ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
+    ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
+
+    boxes = inputs.at(i+1).tensor();
+    dims = boxes.getDimensions();
+    ASSERT(dims.d[0] == num_anchors * 4, ErrorCode::kINVALID_NODE);
+    ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
+    ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
+  }
 
   OnnxAttrs attrs(node);
   auto score_thresh = attrs.get<float>("score_thresh");
-  auto top_n = attrs.get<int>("top_n");
+  auto pre_nms_top_n = attrs.get<int>("pre_nms_top_n");
+  auto nms_thresh = attrs.get<float>("nms_thresh", 0);
+  auto detections_per_im = attrs.get<int>("detections_per_im", 0);
   auto anchors = attrs.get<std::vector<float>>("anchors");
 
-  RETURN_FIRST_OUTPUT(ctx->addPlugin(new BoxExtractPlugin(score_thresh, top_n, anchors),
-                                     {&inputs.at(0).tensor(), &inputs.at(1).tensor(), &inputs.at(2).tensor()}));
-}
-
-DEFINE_BUILTIN_OP_IMPORTER(BoxMergeWithNMS) {
-  for( auto& input : inputs ) {
-    ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensors[inputs.size()] = {};
+  for( int i = 0; i < inputs.size(); i++ ) {
+    tensors[i] = inputs.at(i).tensor();
   }
 
-  nvinfer1::ITensor& detections = inputs.at(0).tensor();
-  nvinfer1::Dims dims = detections.getDimensions();
-  ASSERT(dims.nbDims == 2, ErrorCode::kINVALID_NODE);
-  int n = dims.d[0];
-  ASSERT(dims.d[1] == 7, ErrorCode::kINVALID_NODE);
-
-  OnnxAttrs attrs(node);
-  auto nms = attrs.get<float>("nms", 0);
-  auto detections_per_im = attrs.get<int>("detections_per_im", 0);
-
-  nvinfer1::ILayer* layer_ptr = ctx->addPlugin(new BoxMergeWithNMSPlugin(nms, detections_per_im),
-                                               {&inputs.at(0).tensor()});
+  nvinfer1::ILayer* layer_ptr = ctx->addPlugin(
+    new BoxDecodePlugin(score_thresh, pre_nms_top_n, nms_thresh, detections_per_im, anchors), tensors));
   ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
   return {{layer_ptr->getOutput(0), layer_ptr->getOutput(1), layer_ptr->getOutput(2), layer_ptr->getOutput(3)}};
 }
