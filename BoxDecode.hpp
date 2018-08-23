@@ -24,7 +24,6 @@
 
 #include "plugin.hpp"
 #include "serialize.hpp"
-#include "ShapedWeights.hpp"
 
 #include <cassert>
 
@@ -42,7 +41,7 @@ protected:
     deserialize_value(&serialData, &serialLength, &_pre_nms_top_n);
     deserialize_value(&serialData, &serialLength, &_nms_thresh);
     deserialize_value(&serialData, &serialLength, &_detections_per_im);
-    deserialize_value(&serialData, &serialLength, &anchors);
+    deserialize_value(&serialData, &serialLength, &_anchors);
     deserialize_value(&serialData, &serialLength, &_anchors_counts);
   }
   virtual size_t getSerializationSize() override {
@@ -61,14 +60,14 @@ protected:
   }
 public:
   BoxDecodePlugin(float score_thresh, int pre_nms_top_n, float nms_thresh, int detections_per_im,
-                  ShapedWeights const& anchors)
+                  std::vector<float> const& anchors,std::vector<int> const& anchors_counts)
     : _score_thresh(score_thresh), _pre_nms_top_n(pre_nms_top_n), _nms_thresh(nms_thresh),
-      _detections_per_im(detections_per_im), _anchors(anchors) {
+      _detections_per_im(detections_per_im), _anchors(anchors), _anchors_counts(anchors_counts) {
     assert(score_thresh >= 0);
     assert(pre_nms_top_n > 0);
     assert(nms_thresh >= 0);
     assert(detections_per_im > 0);
-    assert(_anchors.size() == std::accumulate(_anchors_counts.begin(), _anchors_counts.end(), 0));
+    assert(anchors.size() == std::accumulate(anchors_counts.begin(), anchors_counts.end(), 0));
   }
   BoxDecodePlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);

@@ -484,8 +484,7 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   auto nms_thresh = attrs.get<float>("nms_thresh", 0);
   auto detections_per_im = attrs.get<int>("detections_per_im", 0);
   auto anchors = attrs.get<std::vector<float>>("anchors");
-  auto anchors = attrs.get<std::vector<int>>("anchors_counts");
-  ASSERT(anchors.size() == 0 || anchors.size() == inputs.size() / 2, ErrorCode::kINVALID_NODE);
+  auto anchors_counts = attrs.get<std::vector<int>>("anchors_counts");
 
   std::vector<nvinfer1::ITensor*> input_tensors;
   for( auto input : inputs ) {

@@ -106,8 +106,8 @@ int BoxDecodePlugin::enqueue(int batchSize,
 
       if( !_anchors.empty() ) {
         // Add anchors offsets to deltas
-        auto anchors_ptr = anchors.data();
-        for( int c = 0; c < i/2; c++ ) anchors_ptr += _anchors_counts[i/2];
+        auto anchors_ptr = _anchors.data();
+        for( size_t c = 0; c < i/2; c++ ) anchors_ptr += _anchors_counts[i/2];
         thrust::device_vector<float> anchors(_anchors_counts[i/2]);
         thrust::copy_n(anchors_ptr, _anchors_counts[i/2], anchors.begin());
         auto anchors_ptr_d = thrust::raw_pointer_cast(anchors.data());
@@ -132,7 +132,7 @@ int BoxDecodePlugin::enqueue(int batchSize,
       thrust::copy_n(all_boxes.begin() + size, boxes.size(), boxes.begin());
     }
 
-    // Non maximum suppression
+    // Per class non maximum suppression
 
 
     all_scores.resize(_detections_per_im);
