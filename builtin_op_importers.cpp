@@ -459,22 +459,20 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   ASSERT(inputs.size() % 2 == 1, ErrorCode::kINVALID_NODE);
 
   nvinfer1::ITensor& im_info = inputs.at(0).tensor();
-  dims = im_info.getDimensions();
+  nvinfer1::Dims dims = im_info.getDimensions();
   ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
 
-  for( int i = 1; i < inputs.size(); i += 2 ) {
+  for( size_t i = 1; i < inputs.size(); i += 2 ) {
     nvinfer1::ITensor& scores = inputs.at(i).tensor();
     nvinfer1::Dims dims = scores.getDimensions();
     ASSERT(dims.nbDims >= 3, ErrorCode::kINVALID_NODE);
 
-    int num_anchors_classes = dims.d[0];
     int height = dims.d[1];
     int width = dims.d[2];
 
     nvinfer1::ITensor& boxes = inputs.at(i+1).tensor();
     dims = boxes.getDimensions();
     int num_anchors = dims.d[0] / 4;
-    int num_classes = num_anchors_classes / num_anchors;
     ASSERT(dims.d[0] == num_anchors * 4, ErrorCode::kINVALID_NODE);
     ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
     ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
@@ -488,13 +486,13 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   auto anchors = attrs.get<std::vector<std::vector<float>>>("anchors");
   ASSERT(anchors.size() == 0 || anchors.size() == inputs.size() / 2, ErrorCode::kINVALID_NODE);
 
-  nvinfer1::ITensor& tensors[inputs.size()] = {};
-  for( int i = 0; i < inputs.size(); i++ ) {
-    tensors[i] = inputs.at(i).tensor();
+  std::vector<nvinfer1::ITensor*> input_tensors;
+  for( auto input : inputs ) {
+    input_tensors.push_back(&input.tensor());
   }
 
   nvinfer1::ILayer* layer_ptr = ctx->addPlugin(
-    new BoxDecodePlugin(score_thresh, pre_nms_top_n, nms_thresh, detections_per_im, anchors), tensors));
+    new BoxDecodePlugin(score_thresh, pre_nms_top_n, nms_thresh, detections_per_im, anchors), input_tensors);
   ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
   return {{layer_ptr->getOutput(0), layer_ptr->getOutput(1), layer_ptr->getOutput(2), layer_ptr->getOutput(3)}};
 }

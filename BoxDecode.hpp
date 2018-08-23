@@ -25,7 +25,6 @@
 #include "plugin.hpp"
 #include "serialize.hpp"
 
-#include <thrust/device_vector.h>
 #include <cassert>
 
 class BoxDecodePlugin final : public onnx2trt::Plugin {
@@ -34,7 +33,6 @@ class BoxDecodePlugin final : public onnx2trt::Plugin {
   float _nms_thresh;
   int _detections_per_im;
   std::vector<std::vector<float>> _anchors;
-  thrust::device_vector<thrust::device_vector<float>> _offsets;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
@@ -42,12 +40,20 @@ protected:
     deserialize_value(&serialData, &serialLength, &_pre_nms_top_n);
     deserialize_value(&serialData, &serialLength, &_nms_thresh);
     deserialize_value(&serialData, &serialLength, &_detections_per_im);
-    deserialize_value(&serialData, &serialLength, &_anchors);
+    while( serialLength > 0 ) {
+      std::vector<float> anchors;
+      deserialize_value(&serialData, &serialLength, &anchors);
+      _anchors.push_back(anchors);
+    }
   }
   virtual size_t getSerializationSize() override {
+    size_t anchors_size = 0;
+    for( auto& anchors : _anchors ) {
+      anchors_size += anchors.size();
+    }
     return serialized_size(_score_thresh) + serialized_size(_pre_nms_top_n)
       + serialized_size(_nms_thresh) + serialized_size(_detections_per_im) 
-      + serialized_size(_anchors) + getBaseSerializationSize();
+      + anchors_size + getBaseSerializationSize();
   }
   virtual void serialize(void *buffer) override {
     serializeBase(buffer);
@@ -55,11 +61,13 @@ protected:
     serialize_value(&buffer, _pre_nms_top_n);
     serialize_value(&buffer, _nms_thresh);
     serialize_value(&buffer, _detections_per_im);
-    serialize_value(&buffer, _anchors);
+    for( auto& anchors : _anchors ) {
+      serialize_value(&buffer, anchors);
+    }
   }
 public:
   BoxDecodePlugin(float score_thresh, int pre_nms_top_n, float nms_thresh, int detections_per_im,
-                  std::vector<float> const& anchors)
+                  std::vector<std::vector<float>> const& anchors)
     : _score_thresh(score_thresh), _pre_nms_top_n(pre_nms_top_n), _nms_thresh(nms_thresh),
       _detections_per_im(detections_per_im), _anchors(anchors) {
     assert(score_thresh >= 0);
