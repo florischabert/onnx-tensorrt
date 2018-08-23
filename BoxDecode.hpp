@@ -33,8 +33,8 @@ class BoxDecodePlugin final : public onnx2trt::Plugin {
   int _pre_nms_top_n;
   float _nms_thresh;
   int _detections_per_im;
-  std::vector<float> _anchors;
-  thrust::device_vector<float> _offsets;
+  std::vector<std::vector<float>> _anchors;
+  thrust::device_vector<thrust::device_vector<float>> _offsets;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
@@ -58,8 +58,9 @@ protected:
     serialize_value(&buffer, _anchors);
   }
 public:
-  BoxDecodePlugin(float score_thresh, int top_n, std::vector<float> const& anchors)
-    : _score_thresh(score_thresh), _pre_nms_top_n(pre_nms_top_n) ,_nms_thresh(nms_thresh),
+  BoxDecodePlugin(float score_thresh, int pre_nms_top_n, float nms_thresh, int detections_per_im,
+                  std::vector<float> const& anchors)
+    : _score_thresh(score_thresh), _pre_nms_top_n(pre_nms_top_n), _nms_thresh(nms_thresh),
       _detections_per_im(detections_per_im), _anchors(anchors) {
     assert(score_thresh >= 0);
     assert(pre_nms_top_n > 0);

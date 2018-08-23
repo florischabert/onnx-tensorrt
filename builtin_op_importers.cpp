@@ -462,32 +462,19 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   dims = im_info.getDimensions();
   ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
 
-  nvinfer1::ITensor& scores = inputs.at(1).tensor();
-  nvinfer1::Dims dims = scores.getDimensions();
-  ASSERT(dims.nbDims >= 3, ErrorCode::kINVALID_NODE);
-
-  int num_anchors_classes = dims.d[0];
-  int height = dims.d[1];
-  int width = dims.d[2];
-
-  nvinfer1::ITensor& boxes = inputs.at(2).tensor();
-  dims = boxes.getDimensions();
-  int num_anchors = dims.d[0] / 4;
-  int num_classes = num_anchors_classes / num_anchors;
-  ASSERT(dims.d[0] == num_anchors * 4, ErrorCode::kINVALID_NODE);
-  ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
-  ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
-
-  for( int i = 3; i < inputs.size(); i += 2 ) {
-    scores = inputs.at(i).tensor();
-    dims = scores.getDimensions();
+  for( int i = 1; i < inputs.size(); i += 2 ) {
+    nvinfer1::ITensor& scores = inputs.at(i).tensor();
+    nvinfer1::Dims dims = scores.getDimensions();
     ASSERT(dims.nbDims >= 3, ErrorCode::kINVALID_NODE);
-    ASSERT(dims.d[0] == num_anchors * num_classes, ErrorCode::kINVALID_NODE);
-    ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
-    ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
 
-    boxes = inputs.at(i+1).tensor();
+    int num_anchors_classes = dims.d[0];
+    int height = dims.d[1];
+    int width = dims.d[2];
+
+    nvinfer1::ITensor& boxes = inputs.at(i+1).tensor();
     dims = boxes.getDimensions();
+    int num_anchors = dims.d[0] / 4;
+    int num_classes = num_anchors_classes / num_anchors;
     ASSERT(dims.d[0] == num_anchors * 4, ErrorCode::kINVALID_NODE);
     ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
     ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
@@ -498,7 +485,8 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   auto pre_nms_top_n = attrs.get<int>("pre_nms_top_n");
   auto nms_thresh = attrs.get<float>("nms_thresh", 0);
   auto detections_per_im = attrs.get<int>("detections_per_im", 0);
-  auto anchors = attrs.get<std::vector<float>>("anchors");
+  auto anchors = attrs.get<std::vector<std::vector<float>>>("anchors");
+  ASSERT(anchors.size() == 0 || anchors.size() == inputs.size() / 2, ErrorCode::kINVALID_NODE);
 
   nvinfer1::ITensor& tensors[inputs.size()] = {};
   for( int i = 0; i < inputs.size(); i++ ) {
