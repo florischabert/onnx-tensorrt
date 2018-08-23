@@ -50,14 +50,14 @@ int BoxDecodePlugin::enqueue(int batchSize,
                              void *workspace, cudaStream_t stream) {
   auto nbInputs = _input_dims.size();
   auto im_info_ptr = static_cast<const float *>(inputs[0]);
-  auto scores_ptr = static_cast<const float *>(outputs[0]);
-  auto classes_ptr = static_cast<const float *>(outputs[1]);
-  auto boxes_ptr = static_cast<const float4 *>(outputs[2]);
+  auto scores_ptr = static_cast<float *>(outputs[0]);
+  auto classes_ptr = static_cast<float *>(outputs[1]);
+  auto boxes_ptr = static_cast<float4 *>(outputs[2]);
 
   for( int batch = 0; batch < batchSize; batch++ ) {
-    thrust::device_vector<float> all_scores();
-    thrust::device_vector<int> all_classes();
-    thrust::device_vector<float4> all_boxes();
+    thrust::device_vector<float> all_scores(0);
+    thrust::device_vector<int> all_classes(0);
+    thrust::device_vector<float4> all_boxes(0);
 
     for( size_t i = 1; i < nbInputs; i += 2 ) {
       auto const& scores_dims = this->getInputDims(i);
@@ -106,9 +106,11 @@ int BoxDecodePlugin::enqueue(int batchSize,
 
       if( !_anchors.empty() ) {
         // Add anchors offsets to deltas
-        thrust::device_vector<float> anchors(_anchors[i/2].size());
-        thrust::copy(_anchors[i/2].begin(), _anchors[i/2].end(), anchors.begin());
-        auto anchors_ptr = thrust::raw_pointer_cast(anchors.data());
+        auto anchors_ptr = anchors.data();
+        for( int c = 0; c < i/2; c++ ) anchors_ptr += _anchors_counts[i/2];
+        thrust::device_vector<float> anchors(_anchors_counts[i/2]);
+        thrust::copy_n(anchors_ptr, _anchors_counts[i/2], anchors.begin());
+        auto anchors_ptr_d = thrust::raw_pointer_cast(anchors.data());
         
         thrust::transform(
           boxes.begin(), boxes.end(), indices.begin(), boxes.begin(),
@@ -117,33 +119,33 @@ int BoxDecodePlugin::enqueue(int batchSize,
             float x = (i % width) * im_scale;
             float y = ((i / width)  % height) * im_scale;
             int a = (i / num_classes / height / width) % num_anchors;
-            float *d = anchors_ptr + 4*a;
+            float *d = anchors_ptr_d + 4*a;
             return float4{x+d[0]+b.x, y+d[1]+b.y, x+d[2]+b.z, y+d[3]+b.w};
           });
       }
 
       // Expand detections list
-      // auto size = all_scores.size();
-      // all_scores.resize(size + scores.size());
-      // thrust::copy_n(all_scores.begin() + size, scores.size(), scores.begin());
-      // thrust::copy_n(all_classes.begin() + size, classes.size(), classes.begin());
-      // thrust::copy_n(all_boxes.begin() + size, boxes.size(), boxes.begin());
+      auto size = all_scores.size();
+      all_scores.resize(size + scores.size());
+      thrust::copy_n(all_scores.begin() , scores.size(), scores.begin());
+      thrust::copy_n(all_classes.begin() + size, classes.size(), classes.begin());
+      thrust::copy_n(all_boxes.begin() + size, boxes.size(), boxes.begin());
     }
 
     // Non maximum suppression
 
 
-    // all_scores.resize(_detections_per_im);
-    // all_classes.resize(_detections_per_im);
-    // all_boxes.resize(_detections_per_im);
+    all_scores.resize(_detections_per_im);
+    all_classes.resize(_detections_per_im);
+    all_boxes.resize(_detections_per_im);
 
-    // int offset = _detections_per_im * batch;
-    // thrust::copy(all_scores.begin(), all_scores.end(), 
-    //   thrust::device_pointer_cast(scores_ptr) + offset);
-    // thrust::copy(all_classes.begin(), all_classes.end(), 
-    //   thrust::device_pointer_cast(classes_ptr) + offset);
-    // thrust::copy(all_boxes.begin(), all_boxes.end(), 
-    //   thrust::device_pointer_cast(boxes_ptr) + offset);
+    int offset = _detections_per_im * batch;
+    thrust::copy(all_scores.begin(), all_scores.end(), 
+      thrust::device_pointer_cast(scores_ptr + offset));
+    thrust::copy(all_classes.begin(), all_classes.end(), 
+      thrust::device_pointer_cast(classes_ptr + offset));
+    thrust::copy(all_boxes.begin(), all_boxes.end(), 
+      thrust::device_pointer_cast(boxes_ptr + offset));
   }
 
   return 0;

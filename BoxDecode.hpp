@@ -24,6 +24,7 @@
 
 #include "plugin.hpp"
 #include "serialize.hpp"
+#include "ShapedWeights.hpp"
 
 #include <cassert>
 
@@ -32,7 +33,8 @@ class BoxDecodePlugin final : public onnx2trt::Plugin {
   int _pre_nms_top_n;
   float _nms_thresh;
   int _detections_per_im;
-  std::vector<std::vector<float>> _anchors;
+  std::vector<float> _anchors;
+  std::vector<int> _anchors_counts;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
@@ -40,20 +42,14 @@ protected:
     deserialize_value(&serialData, &serialLength, &_pre_nms_top_n);
     deserialize_value(&serialData, &serialLength, &_nms_thresh);
     deserialize_value(&serialData, &serialLength, &_detections_per_im);
-    while( serialLength > 0 ) {
-      std::vector<float> anchors;
-      deserialize_value(&serialData, &serialLength, &anchors);
-      _anchors.push_back(anchors);
-    }
+    deserialize_value(&serialData, &serialLength, &anchors);
+    deserialize_value(&serialData, &serialLength, &_anchors_counts);
   }
   virtual size_t getSerializationSize() override {
-    size_t anchors_size = 0;
-    for( auto& anchors : _anchors ) {
-      anchors_size += anchors.size();
-    }
     return serialized_size(_score_thresh) + serialized_size(_pre_nms_top_n)
       + serialized_size(_nms_thresh) + serialized_size(_detections_per_im) 
-      + anchors_size + getBaseSerializationSize();
+      + serialized_size(_anchors) + serialized_size(_anchors_counts) 
+      + getBaseSerializationSize();
   }
   virtual void serialize(void *buffer) override {
     serializeBase(buffer);
@@ -61,19 +57,18 @@ protected:
     serialize_value(&buffer, _pre_nms_top_n);
     serialize_value(&buffer, _nms_thresh);
     serialize_value(&buffer, _detections_per_im);
-    for( auto& anchors : _anchors ) {
-      serialize_value(&buffer, anchors);
-    }
+    serialize_value(&buffer, _anchors_counts);
   }
 public:
   BoxDecodePlugin(float score_thresh, int pre_nms_top_n, float nms_thresh, int detections_per_im,
-                  std::vector<std::vector<float>> const& anchors)
+                  ShapedWeights const& anchors)
     : _score_thresh(score_thresh), _pre_nms_top_n(pre_nms_top_n), _nms_thresh(nms_thresh),
       _detections_per_im(detections_per_im), _anchors(anchors) {
     assert(score_thresh >= 0);
     assert(pre_nms_top_n > 0);
     assert(nms_thresh >= 0);
     assert(detections_per_im > 0);
+    assert(_anchors.size() == std::accumulate(_anchors_counts.begin(), _anchors_counts.end(), 0));
   }
   BoxDecodePlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);

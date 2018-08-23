@@ -483,7 +483,8 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   auto pre_nms_top_n = attrs.get<int>("pre_nms_top_n");
   auto nms_thresh = attrs.get<float>("nms_thresh", 0);
   auto detections_per_im = attrs.get<int>("detections_per_im", 0);
-  auto anchors = attrs.get<std::vector<std::vector<float>>>("anchors");
+  auto anchors = attrs.get<std::vector<float>>("anchors");
+  auto anchors = attrs.get<std::vector<int>>("anchors_counts");
   ASSERT(anchors.size() == 0 || anchors.size() == inputs.size() / 2, ErrorCode::kINVALID_NODE);
 
   std::vector<nvinfer1::ITensor*> input_tensors;
@@ -492,7 +493,8 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
   }
 
   nvinfer1::ILayer* layer_ptr = ctx->addPlugin(
-    new BoxDecodePlugin(score_thresh, pre_nms_top_n, nms_thresh, detections_per_im, anchors), input_tensors);
+    new BoxDecodePlugin(
+      score_thresh, pre_nms_top_n, nms_thresh, detections_per_im, anchors, anchors_counts), input_tensors);
   ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
   return {{layer_ptr->getOutput(0), layer_ptr->getOutput(1), layer_ptr->getOutput(2), layer_ptr->getOutput(3)}};
 }
