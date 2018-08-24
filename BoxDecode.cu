@@ -59,13 +59,13 @@ int BoxDecodePlugin::enqueue(int batchSize,
 
   for( int batch = 0; batch < batchSize; batch++ ) {
     size_t in_offset = batch * scores_size;
-    auto scores_ptr = static_cast<float *>(inputs[0] + in_offset);
-    auto boxes_ptr = static_cast<float4 *>(inputs[1] + in_offset / num_classes);
+    auto scores_ptr = static_cast<const float *>(inputs[0]) + in_offset;
+    auto boxes_ptr = static_cast<const float4 *>(inputs[1]) + in_offset / num_classes;
 
     size_t out_offset = batch * _top_n;
-    auto out_scores_ptr = static_cast<float *>(outputs[0] + out_offset);
-    auto out_boxes_ptr = static_cast<float4 *>(outputs[1] + out_offset);
-    auto out_classes_ptr = static_cast<float *>(outputs[2] + out_offset);
+    auto out_scores_ptr = static_cast<float *>(outputs[0]) + out_offset;
+    auto out_boxes_ptr = static_cast<float4 *>(outputs[1]) + out_offset;
+    auto out_classes_ptr = static_cast<float *>(outputs[2]) + out_offset;
   
     // // Filter scores above threshold 
     thrust::device_vector<int> indices(scores_size);
@@ -85,8 +85,9 @@ int BoxDecodePlugin::enqueue(int batchSize,
     // Sort scores and corresponding indices
     thrust::sort_by_key(scores.begin(), scores.end(), indices.begin(), 
       thrust::greater<float>());
-    indices.resize(std::min(indices.size(), static_cast<int>(_top_n)));
-    scores.resize(indices.size())
+    indices.resize(
+      std::min(indices.size(), static_cast<size_t>(_top_n)));
+    scores.resize(indices.size());
 
     // Gather boxes
     thrust::device_vector<float4> boxes(indices.size());

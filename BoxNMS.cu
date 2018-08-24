@@ -50,14 +50,14 @@ int BoxNMSPlugin::enqueue(int batchSize,
 
   for( int batch = 0; batch < batchSize; batch++ ) {
     size_t in_offset = batch * count;
-    auto scores_ptr = static_cast<float *>(inputs[0] + in_offset);
-    auto boxes_ptr = static_cast<float4 *>(inputs[1] + in_offset);
-    auto classes_ptr = static_cast<float *>(inputs[2] + in_offset);
+    auto scores_ptr = static_cast<const float *>(inputs[0]) + in_offset;
+    auto boxes_ptr = static_cast<const float4 *>(inputs[1]) + in_offset;
+    auto classes_ptr = static_cast<const float *>(inputs[2]) + in_offset;
 
     size_t out_offset = batch * _detections_per_im;
-    auto nms_scores_ptr = static_cast<float *>(outputs[0] + out_offset);
-    auto nms_boxes_ptr = static_cast<float4 *>(outputs[1] + out_offset);
-    auto nms_classes_ptr = static_cast<float *>(outputs[2] + out_offset);
+    auto nms_scores_ptr = static_cast<float *>(outputs[0]) + out_offset;
+    auto nms_boxes_ptr = static_cast<float4 *>(outputs[1]) + out_offset;
+    auto nms_classes_ptr = static_cast<float *>(outputs[2]) + out_offset;
   
     // Extract actual detections
     thrust::device_vector<int> indices(count);
@@ -77,8 +77,9 @@ int BoxNMSPlugin::enqueue(int batchSize,
     // Sort scores and corresponding indices
     thrust::sort_by_key(scores.begin(), scores.end(), indices.begin(), 
       thrust::greater<float>());
-    indices.resize(std::min(indices.size(), static_cast<int>(_detections_per_im)));
-    scores.resize(indices.size())
+    indices.resize(
+      std::min(indices.size(), static_cast<size_t>(_detections_per_im)));
+    scores.resize(indices.size());
   
     // Gather boxes
     thrust::device_vector<float4> boxes(indices.size());
