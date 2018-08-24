@@ -26,13 +26,66 @@
 #include <thrust/tabulate.h>
 #include <cassert>
 
-void nms(thrust::device_vector<float>& scores, 
-         thrust::device_vector<float4>& boxes,
-         thrust::device_vector<float>& classes,
+void nms(const thrust::device_vector<float>::iterator& scores_begin, 
+         const thrust::device_vector<float>::iterator& scores_end,
+         const thrust::device_vector<float4>::iterator& boxes_begin,
          float threshold) {
 
-}
+  auto count = thrust::distance(scores_begin, scores_end);
 
+  // Sort scores
+  thrust::device_vector<int> indices(count);
+  thrust::copy(
+    thrust::make_counting_iterator<int>(0),
+    thrust::make_counting_iterator<int>(count),
+    indices.begin());
+  thrust::sort_by_key(scores_begin, scores_end, indices.begin(),
+    thrust::greater<float>());
+
+  thrust::device_vector<int> keep(0);
+  while( !indices.empty() ) {
+    auto last = indices.back();
+    keep.push_back(last);
+
+    // Compute boxes intersection
+    thrust::device_vector<float4> boxes(indices.size() - 1);
+    thrust::gather(
+      indices.begin(), indices.end() - 1, boxes_begin, boxes.begin());
+
+    thrust::device_vector<float> overlap(indices.size() - 1);
+    thrust::transform(boxes.begin(), boxes.end(), overlap.begin(),
+      [=] __device__ (float4 box) {
+        float4 it = *(boxes_begin + last);
+        float xx1 = max(it.x, box.x);
+        float yy1 = max(it.y, box.y);
+        float xx2 = min(it.x + it.z, box.x + box.z);
+        float yy2 = min(it.y + it.w, box.y + box.w);
+        float inter = (xx2 - xx1 + 1) * (yy2 - yy1 + 1);
+        float area = box.z * box.w;
+        return inter / area;
+      });
+
+    indices.pop_back();
+
+    // Zero out discarded scores
+    thrust::device_vector<int> discard(indices.size());
+    auto last_idx = thrust::copy_if(
+      indices.begin(), indices.end(), 
+      overlap.begin(), discard.begin(),
+      thrust::placeholders::_1 > threshold);
+    discard.resize(thrust::distance(discard.begin(), last_idx));
+    thrust::fill(
+      thrust::make_permutation_iterator(scores_begin, discard.begin()),
+      thrust::make_permutation_iterator(scores_begin, discard.end()), 0);
+
+    // Keep indices under overlap threshold
+    last_idx = thrust::copy_if(
+      indices.begin(), indices.end(), 
+      overlap.begin(), indices.begin(),
+      thrust::placeholders::_1 <= threshold);
+    indices.resize(thrust::distance(indices.begin(), last_idx));
+  }
+}
 
 nvinfer1::Dims BoxNMSPlugin::getOutputDimensions(int index,
                                                  const nvinfer1::Dims *inputDims,
@@ -54,7 +107,7 @@ int BoxNMSPlugin::initialize() {
 int BoxNMSPlugin::enqueue(int batchSize,
                           const void *const *inputs, void **outputs,
                           void *workspace, cudaStream_t stream) {
-  size_t count = this->getInputDims(0).d[1];
+  size_t count = this->getInputDims(0).d[0];
 
   for( int batch = 0; batch < batchSize; batch++ ) {
     size_t in_offset = batch * count;
@@ -76,8 +129,15 @@ int BoxNMSPlugin::enqueue(int batchSize,
       indices.begin(),
       thrust::placeholders::_1 > 0);
     indices.resize(thrust::distance(indices.begin(), last_idx));
+  
+    // Sort by class
+    thrust::device_vector<float> classes(indices.size());
+    thrust::gather(indices.begin(), indices.end(),
+      thrust::device_pointer_cast(classes_ptr), classes.begin());
 
-    // Gather scores, boxes, classes
+    thrust::sort_by_key(classes.begin(), classes.end(), indices.begin());
+
+    // Gather scores, boxes
     thrust::device_vector<float> scores(indices.size());
     thrust::gather(indices.begin(), indices.end(),
       thrust::device_pointer_cast(scores_ptr), scores.begin());
@@ -86,12 +146,19 @@ int BoxNMSPlugin::enqueue(int batchSize,
     thrust::gather(indices.begin(), indices.end(),
       thrust::device_pointer_cast(boxes_ptr), boxes.begin()); 
 
-    thrust::device_vector<float> classes(indices.size());
-    thrust::gather(indices.begin(), indices.end(),
-      thrust::device_pointer_cast(classes_ptr), classes.begin());
-  
-    // Non maximum suppression
-    nms(scores, boxes, classes, _nms_thresh);
+    // Per-class non maximum suppression
+    auto class_begin = classes.begin();
+    while( class_begin < classes.end() ) {
+      auto class_end = thrust::find_if(class_begin, classes.end(),
+        thrust::placeholders::_1 > *class_begin);
+
+      auto begin = thrust::distance(classes.begin(), class_begin);
+      auto end = thrust::distance(classes.begin(), class_end);
+      nms(scores.begin() + begin, scores.begin() + end, 
+        boxes.begin() + begin, _nms_thresh);
+
+      class_begin = class_end;
+    }
 
     // Sort scores and corresponding indices
     indices.resize(boxes.size());
