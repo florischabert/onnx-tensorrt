@@ -26,6 +26,14 @@
 #include <thrust/tabulate.h>
 #include <cassert>
 
+void nms(thrust::device_vector<float>& scores, 
+         thrust::device_vector<float4>& boxes,
+         thrust::device_vector<float>& classes,
+         float threshold) {
+
+}
+
+
 nvinfer1::Dims BoxNMSPlugin::getOutputDimensions(int index,
                                                  const nvinfer1::Dims *inputDims,
                                                  int nbInputs) {
@@ -34,7 +42,7 @@ nvinfer1::Dims BoxNMSPlugin::getOutputDimensions(int index,
   switch( index ) {
     case 1: // boxes
       return {2, {_detections_per_im, 4}};
-    default:// scores, classes
+    default: // scores, classes
       return {1, {_detections_per_im}};
   }
 }
@@ -69,43 +77,56 @@ int BoxNMSPlugin::enqueue(int batchSize,
       thrust::placeholders::_1 > 0);
     indices.resize(thrust::distance(indices.begin(), last_idx));
 
-    // Gather filtered scores
+    // Gather scores, boxes, classes
     thrust::device_vector<float> scores(indices.size());
     thrust::gather(indices.begin(), indices.end(),
       thrust::device_pointer_cast(scores_ptr), scores.begin());
 
+    thrust::device_vector<float4> boxes(indices.size());
+    thrust::gather(indices.begin(), indices.end(),
+      thrust::device_pointer_cast(boxes_ptr), boxes.begin()); 
+
+    thrust::device_vector<float> classes(indices.size());
+    thrust::gather(indices.begin(), indices.end(),
+      thrust::device_pointer_cast(classes_ptr), classes.begin());
+  
+    // Non maximum suppression
+    nms(scores, boxes, classes, _nms_thresh);
+
     // Sort scores and corresponding indices
+    indices.resize(boxes.size());
+    thrust::copy(
+      thrust::make_counting_iterator<int>(0),
+      thrust::make_counting_iterator<int>(indices.size()),
+      indices.begin());
+
     thrust::sort_by_key(scores.begin(), scores.end(), indices.begin(), 
       thrust::greater<float>());
     indices.resize(
       std::min(indices.size(), static_cast<size_t>(_detections_per_im)));
     scores.resize(indices.size());
   
-    // Gather boxes
-    thrust::device_vector<float4> boxes(indices.size());
+    // Gather filtered boxes, classes
+    thrust::device_vector<float4> boxes_nms(indices.size());
     thrust::gather(indices.begin(), indices.end(),
-      thrust::device_pointer_cast(boxes_ptr), boxes.begin());
+      boxes.begin(), boxes_nms.begin()); 
 
-    // Gather classes
-    thrust::device_vector<float> classes(indices.size());
+    thrust::device_vector<float> classes_nms(indices.size());
     thrust::gather(indices.begin(), indices.end(),
-      thrust::device_pointer_cast(classes_ptr), classes.begin());
+      classes.begin(), classes_nms.begin());
 
-    // Non maximum suppression
-    // TODO
-
-     // Copy to output
+    // Copy to output
     thrust::copy(scores.begin(), scores.end(), 
       thrust::device_pointer_cast(nms_scores_ptr));
-    thrust::copy(boxes.begin(), boxes.end(),
+    thrust::copy(boxes_nms.begin(), boxes_nms.end(),
       thrust::device_pointer_cast(nms_boxes_ptr));
-    thrust::copy(classes.begin(), classes.end(), 
+    thrust::copy(classes_nms.begin(), classes_nms.end(), 
       thrust::device_pointer_cast(nms_classes_ptr));
 
     // Zero fill unused scores
     thrust::fill(
       thrust::device_pointer_cast(nms_scores_ptr + indices.size()), 
-      thrust::device_pointer_cast(nms_scores_ptr + _detections_per_im * batch), 0);
+      thrust::device_pointer_cast(nms_scores_ptr + _detections_per_im), 0);
   }
 
   return 0;

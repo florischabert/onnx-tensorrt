@@ -495,14 +495,14 @@ DEFINE_BUILTIN_OP_IMPORTER(BoxNMS) {
 
   ASSERT(inputs.at(1).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor& boxes = inputs.at(1).tensor();
-  dims = scores.getDimensions();
+  dims = boxes.getDimensions();
   ASSERT(dims.nbDims == 2, ErrorCode::kINVALID_NODE);
   ASSERT(dims.d[0] == count, ErrorCode::kINVALID_NODE);
   ASSERT(dims.d[1] == 4, ErrorCode::kINVALID_NODE);
 
   ASSERT(inputs.at(2).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor& classes = inputs.at(1).tensor();
-  dims = scores.getDimensions();
+  nvinfer1::ITensor& classes = inputs.at(2).tensor();
+  dims = classes.getDimensions();
   ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
   ASSERT(dims.d[0] == count, ErrorCode::kINVALID_NODE);
 

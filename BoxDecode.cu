@@ -34,7 +34,7 @@ nvinfer1::Dims BoxDecodePlugin::getOutputDimensions(int index,
   switch( index ) {
     case 1: // boxes
       return {2, {_top_n, 4}};
-    default:// scores, classes
+    default: // scores, classes
       return {1, {_top_n}};
   }
 }
@@ -94,7 +94,7 @@ int BoxDecodePlugin::enqueue(int batchSize,
     thrust::gather(indices.begin(), indices.end(),
       thrust::device_pointer_cast(boxes_ptr), boxes.begin());
 
-    // Get classes
+    // Infer classes
     thrust::device_vector<float> classes(indices.size());
     thrust::transform(indices.begin(), indices.end(), classes.begin(),
       (thrust::placeholders::_1 / height / width) % num_classes);
@@ -104,9 +104,9 @@ int BoxDecodePlugin::enqueue(int batchSize,
       auto anchors_ptr_d = thrust::raw_pointer_cast(_anchors_d.data());
       thrust::transform(
         boxes.begin(), boxes.end(), indices.begin(), boxes.begin(),
-        [=] __device__ (float4 b, int i) {
-          float x = (i % width) * _scale;
-          float y = ((i / width)  % height) * _scale;
+        [=, scale=_scale] __device__ (float4 b, int i) {
+          float x = (i % width) * scale;
+          float y = ((i / width)  % height) * scale;
           int a = (i / num_classes / height / width) % num_anchors;
           float *d = anchors_ptr_d + 4*a;
           return float4{x+d[0]+b.x, y+d[1]+b.y, x+d[2]+b.z, y+d[3]+b.w};
@@ -123,8 +123,8 @@ int BoxDecodePlugin::enqueue(int batchSize,
 
     // Zero fill unused scores
     thrust::fill(
-      thrust::device_pointer_cast(out_scores_ptr + indices.size()), 
-      thrust::device_pointer_cast(out_scores_ptr + _top_n * batch), 0);
+      thrust::device_pointer_cast(out_scores_ptr + scores.size()), 
+      thrust::device_pointer_cast(out_scores_ptr + _top_n), 0);
   }
 
   return 0;
