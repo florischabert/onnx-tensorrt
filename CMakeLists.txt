@@ -55,6 +55,7 @@ set(PLUGIN_SOURCES
   Split.cu
   InstanceNormalization.cpp
   BoxDecode.cu
+  BoxNMS.cu
   plugin.cpp
   )
 

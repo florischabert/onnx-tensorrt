@@ -28,6 +28,7 @@
 #include "Split.hpp"
 #include "InstanceNormalization.hpp"
 #include "BoxDecode.hpp"
+#include "BoxNMS.hpp"
 
 #include <numeric> // For std::iota
 
@@ -452,50 +453,70 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(BoxDecode) {
-  for( auto& input : inputs ) {
-    ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  }
-  ASSERT(inputs.size() >= 3, ErrorCode::kINVALID_NODE);
-  ASSERT(inputs.size() % 2 == 1, ErrorCode::kINVALID_NODE);
+  ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
 
-  nvinfer1::ITensor& im_info = inputs.at(0).tensor();
-  nvinfer1::Dims dims = im_info.getDimensions();
-  ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
+  ASSERT(input.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& scores = inputs.at(0).tensor();
+  nvinfer1::Dims dims = scores.getDimensions();
+  ASSERT(dims.nbDims == 3, ErrorCode::kINVALID_NODE);
+  int anchors_classes_count = dims.d[0];
+  int height = dims.d[1];
+  int width = dims.d[2];
 
-  for( size_t i = 1; i < inputs.size(); i += 2 ) {
-    nvinfer1::ITensor& scores = inputs.at(i).tensor();
-    nvinfer1::Dims dims = scores.getDimensions();
-    ASSERT(dims.nbDims >= 3, ErrorCode::kINVALID_NODE);
-
-    int height = dims.d[1];
-    int width = dims.d[2];
-
-    nvinfer1::ITensor& boxes = inputs.at(i+1).tensor();
-    dims = boxes.getDimensions();
-    int num_anchors = dims.d[0] / 4;
-    ASSERT(dims.d[0] == num_anchors * 4, ErrorCode::kINVALID_NODE);
-    ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
-    ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
-  }
+  ASSERT(input.at(1).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& boxes = inputs.at(1).tensor();
+  dims = scores.getDimensions();
+  ASSERT(dims.nbDims == 3, ErrorCode::kINVALID_NODE);
+  int anchor_count = dims.d[0] / 4;
+  ASSERT(anchors_classes_count % anchor_count == 0, ErrorCode::kINVALID_NODE);
+  ASSERT(dims.d[1] == height, ErrorCode::kINVALID_NODE);
+  ASSERT(dims.d[2] == width, ErrorCode::kINVALID_NODE);
 
   OnnxAttrs attrs(node);
   auto score_thresh = attrs.get<float>("score_thresh");
-  auto pre_nms_top_n = attrs.get<int>("pre_nms_top_n");
-  auto nms_thresh = attrs.get<float>("nms_thresh", 0);
-  auto detections_per_im = attrs.get<int>("detections_per_im", 0);
+  auto pre_nms_top_n = attrs.get<int>("top_n");
   auto anchors = attrs.get<std::vector<float>>("anchors");
-  auto anchors_counts = attrs.get<std::vector<int>>("anchors_counts");
-
-  std::vector<nvinfer1::ITensor*> input_tensors;
-  for( auto input : inputs ) {
-    input_tensors.push_back(&input.tensor());
-  }
+  auto anchors = attrs.get<float>("scale");
 
   nvinfer1::ILayer* layer_ptr = ctx->addPlugin(
     new BoxDecodePlugin(
-      score_thresh, pre_nms_top_n, nms_thresh, detections_per_im, anchors, anchors_counts), input_tensors);
+      score_thresh, pre_nms_top_n, nms_thresh, detections_per_im, anchors, 
+      {scores, boxes}), input_tensors);
   ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
-  return {{layer_ptr->getOutput(0), layer_ptr->getOutput(1), layer_ptr->getOutput(2), layer_ptr->getOutput(3)}};
+  return {{layer_ptr->getOutput(0), layer_ptr->getOutput(1), layer_ptr->getOutput(2)}};
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(BoxNMS) {
+  ASSERT(inputs.size() == 3, ErrorCode::kINVALID_NODE);
+
+  ASSERT(input.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& scores = inputs.at(0).tensor();
+  nvinfer1::Dims dims = scores.getDimensions();
+  ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
+  int count = dims.d[0];
+
+  ASSERT(input.at(1).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& boxes = inputs.at(1).tensor();
+  dims = scores.getDimensions();
+  ASSERT(dims.nbDims == 2, ErrorCode::kINVALID_NODE);
+  ASSERT(dims.d[0] == count, ErrorCode::kINVALID_NODE);
+  ASSERT(dims.d[1] == 4, ErrorCode::kINVALID_NODE);
+
+  ASSERT(input.at(2).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& classes = inputs.at(1).tensor();
+  dims = scores.getDimensions();
+  ASSERT(dims.nbDims == 1, ErrorCode::kINVALID_NODE);
+  ASSERT(dims.d[0] == count, ErrorCode::kINVALID_NODE);
+
+  OnnxAttrs attrs(node);
+  auto nms_thresh = attrs.get<float>("nms_thresh");
+  auto detections_per_im = attrs.get<int>("detections_per_im");
+
+  nvinfer1::ILayer* layer_ptr = ctx->addPlugin(
+    new BoxNMSPlugin(
+      nms_thresh, detections_per_im, {scores, boxes, classes}), input_tensors);
+  ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  return {{layer_ptr->getOutput(0), layer_ptr->getOutput(1), layer_ptr->getOutput(2)}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Ceil) {

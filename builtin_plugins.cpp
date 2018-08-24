@@ -28,6 +28,7 @@
 #include "Split.hpp"
 #include "InstanceNormalization.hpp"
 #include "BoxDecode.hpp"
+#include "BoxNMS.hpp"
 
 namespace onnx2trt {
 
@@ -74,9 +75,11 @@ REGISTER_BUILTIN_PLUGIN("FancyActivation",       FancyActivationPlugin);
 REGISTER_BUILTIN_PLUGIN("ResizeNearest",         ResizeNearestPlugin);
 REGISTER_BUILTIN_PLUGIN("Split"        ,         SplitPlugin);
 REGISTER_BUILTIN_PLUGIN("InstanceNormalization", InstanceNormalizationPlugin);
-REGISTER_BUILTIN_PLUGIN("BoxDecode"   ,          BoxDecodePlugin);
 
 REGISTER_BUILTIN_NVPLUGIN("Concat", ConcatPlugin);
+
+REGISTER_BUILTIN_PLUGIN("BoxDecode",             BoxDecodePlugin);
+REGISTER_BUILTIN_PLUGIN("BoxNMS"   ,             BoxNMSPlugin);
 
 } // namespace
 

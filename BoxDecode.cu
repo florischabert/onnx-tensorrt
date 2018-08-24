@@ -29,123 +29,101 @@
 nvinfer1::Dims BoxDecodePlugin::getOutputDimensions(int index,
                                                     const nvinfer1::Dims *inputDims,
                                                     int nbInputs) {
-  assert(nbInputs >= 3);
+  assert(nbInputs == );
   assert(index < this->getNbOutputs());
   switch( index ) {
     case 1: // boxes
-      return {2, {_detections_per_im, 4}};
-    case 3: // batch splits
-      return {1, {1}};
+      return {2, {_top_n, 4}};
     default:// scores, classes
-      return {2, {_detections_per_im, 1}};
+      return {1, {_top_n}};
   }
 }
 
 int BoxDecodePlugin::initialize() {
+  _anchors_d.resize(_anchors.size());
+  thrust::copy(_anchors.begin(), _anchors.end(), _anchors_d.begin());
+
   return 0;
 }
 
 int BoxDecodePlugin::enqueue(int batchSize,
                              const void *const *inputs, void **outputs,
                              void *workspace, cudaStream_t stream) {
-  auto nbInputs = _input_dims.size();
-  auto im_info_ptr = static_cast<const float *>(inputs[0]);
-  auto scores_ptr = static_cast<float *>(outputs[0]);
-  auto classes_ptr = static_cast<float *>(outputs[1]);
-  auto boxes_ptr = static_cast<float4 *>(outputs[2]);
+  auto const& scores_dims = this->getInputDims(0);
+  auto const& boxes_dims = this->getInputDims(1);
+  size_t height = scores_dims.d[1];
+  size_t width = scores_dims.d[2];
+  size_t num_anchors = boxes_dims.d[0] / 4; 
+  size_t num_classes = boxes_dims.d[0] / num_anchors;
+  size_t scores_size = num_anchors * num_classes * height * width;
 
   for( int batch = 0; batch < batchSize; batch++ ) {
-    thrust::device_vector<float> all_scores(0);
-    thrust::device_vector<int> all_classes(0);
-    thrust::device_vector<float4> all_boxes(0);
+    size_t in_offset = batch * scores_size;
+    auto scores_ptr = static_cast<float *>(inputs[0] + in_offset);
+    auto boxes_ptr = static_cast<float4 *>(inputs[1] + in_offset / num_classes);
 
-    for( size_t i = 1; i < nbInputs; i += 2 ) {
-      auto const& scores_dims = this->getInputDims(i);
-      auto scores_ptr = static_cast<const float *>(inputs[i]);
-      auto const& boxes_dims = this->getInputDims(i+1);
-      auto boxes_ptr = static_cast<const float4 *>(inputs[i+1]);    
+    size_t out_offset = batch * _top_n;
+    auto out_scores_ptr = static_cast<float *>(outputs[0] + out_offset);
+    auto out_boxes_ptr = static_cast<float4 *>(outputs[1] + out_offset);
+    auto out_classes_ptr = static_cast<float *>(outputs[2] + out_offset);
+  
+    // // Filter scores above threshold 
+    thrust::device_vector<int> indices(scores_size);
+    auto last_idx = thrust::copy_if(
+      thrust::make_counting_iterator<int>(0),
+      thrust::make_counting_iterator<int>(scores_size),
+      thrust::device_pointer_cast(scores_ptr),
+      indices.begin(),
+      thrust::placeholders::_1 > _score_thresh);
+    indices.resize(thrust::distance(indices.begin(), last_idx));
     
-      int height = scores_dims.d[1];
-      int width = scores_dims.d[2];
-      int num_anchors = boxes_dims.d[0] / 4; 
-      int num_classes = boxes_dims.d[0] / num_anchors;
-      int scores_size = batchSize * num_anchors * num_classes * height * width;
-    
-      // // Filter scores above threshold 
-      thrust::device_vector<int> indices(scores_size);
-      auto last_idx = thrust::copy_if(
-        thrust::make_counting_iterator<int>(0),
-        thrust::make_counting_iterator<int>(scores_size),
-        thrust::device_pointer_cast(scores_ptr),
-        indices.begin(),
-        thrust::placeholders::_1 > _score_thresh);
-      indices.resize(thrust::distance(indices.begin(), last_idx));
-      
-      // Gather filtered scores
-      thrust::device_vector<float> scores(indices.size());
-      thrust::gather(indices.begin(), indices.end(),
-        thrust::device_pointer_cast(scores_ptr), scores.begin());
+    // Gather filtered scores
+    thrust::device_vector<float> scores(indices.size());
+    thrust::gather(indices.begin(), indices.end(),
+      thrust::device_pointer_cast(scores_ptr), scores.begin());
 
-      // Sort scores and corresponding indices
-      thrust::sort_by_key(scores.begin(), scores.end(), indices.begin(), 
-        thrust::greater<float>());
+    // Sort scores and corresponding indices
+    thrust::sort_by_key(scores.begin(), scores.end(), indices.begin(), 
+      thrust::greater<float>());
+    indices.resize(std::min(indices.size(), static_cast<int>(_top_n)));
+    scores.resize(indices.size())
 
-      auto pre_nms_top_n = std::min(static_cast<int>(indices.size()), _pre_nms_top_n);
-      scores.resize(pre_nms_top_n);
-      indices.resize(pre_nms_top_n);
+    // Gather boxes
+    thrust::device_vector<float4> boxes(indices.size());
+    thrust::gather(indices.begin(), indices.end(),
+      thrust::device_pointer_cast(boxes_ptr), boxes.begin());
 
-      // Gather boxes
-      thrust::device_vector<float4> boxes(pre_nms_top_n);
-      thrust::gather(indices.begin(), indices.end(),
-        thrust::device_pointer_cast(boxes_ptr), boxes.begin());
+    // Get classes
+    thrust::device_vector<float> classes(indices.size());
+    thrust::transform(indices.begin(), indices.end(), classes.begin(),
+      (thrust::placeholders::_1 / height / width) % num_classes);
 
-      // Get classes
-      thrust::device_vector<float> classes(indices.size());
-      thrust::transform(indices.begin(), indices.end(), classes.begin(),
-        (thrust::placeholders::_1 / height / width) % num_classes);
-
-      if( !_anchors.empty() ) {
-        // Add anchors offsets to deltas
-        auto anchors_ptr = _anchors.data();
-        for( size_t c = 0; c < i/2; c++ ) anchors_ptr += _anchors_counts[i/2];
-        thrust::device_vector<float> anchors(_anchors_counts[i/2]);
-        thrust::copy_n(anchors_ptr, _anchors_counts[i/2], anchors.begin());
-        auto anchors_ptr_d = thrust::raw_pointer_cast(anchors.data());
-        
-        thrust::transform(
-          boxes.begin(), boxes.end(), indices.begin(), boxes.begin(),
-          [=] __device__ (float4 b, int i) {
-            float im_scale = im_info_ptr[0] / height;
-            float x = (i % width) * im_scale;
-            float y = ((i / width)  % height) * im_scale;
-            int a = (i / num_classes / height / width) % num_anchors;
-            float *d = anchors_ptr_d + 4*a;
-            return float4{x+d[0]+b.x, y+d[1]+b.y, x+d[2]+b.z, y+d[3]+b.w};
-          });
-      }
-
-      // Expand detections list
-      auto size = all_scores.size();
-      all_scores.resize(size + scores.size());
-      thrust::copy_n(all_scores.begin() , scores.size(), scores.begin());
-      thrust::copy_n(all_classes.begin() + size, classes.size(), classes.begin());
-      thrust::copy_n(all_boxes.begin() + size, boxes.size(), boxes.begin());
+    if( !_anchors.empty() ) {
+      // Add anchors offsets to deltas
+      auto anchors_ptr_d = thrust::raw_pointer_cast(_anchors_d.data());
+      thrust::transform(
+        boxes.begin(), boxes.end(), indices.begin(), boxes.begin(),
+        [=] __device__ (float4 b, int i) {
+          float x = (i % width) * _scale;
+          float y = ((i / width)  % height) * _scale;
+          int a = (i / num_classes / height / width) % num_anchors;
+          float *d = anchors_ptr_d + 4*a;
+          return float4{x+d[0]+b.x, y+d[1]+b.y, x+d[2]+b.z, y+d[3]+b.w};
+        });
     }
 
-    // Per class non maximum suppression
+    // Copy to output
+    thrust::copy(scores.begin(), scores.end(), 
+      thrust::device_pointer_cast(out_scores_ptr));
+    thrust::copy(boxes.begin(), boxes.end(),
+      thrust::device_pointer_cast(out_boxes_ptr));
+    thrust::copy(classes.begin(), classes.end(), 
+      thrust::device_pointer_cast(out_classes_ptr));
 
-
-    all_scores.resize(_detections_per_im);
-    all_classes.resize(_detections_per_im);
-    all_boxes.resize(_detections_per_im);
-
-    int offset = _detections_per_im * batch;
-    thrust::copy(all_scores.begin(), all_scores.end(), 
-      thrust::device_pointer_cast(scores_ptr + offset));
-    thrust::copy(all_classes.begin(), all_classes.end(), 
-      thrust::device_pointer_cast(classes_ptr + offset));
-    thrust::copy(all_boxes.begin(), all_boxes.end(), 
-      thrust::device_pointer_cast(boxes_ptr + offset));
+    // Zero fill unused scores
+    thrust::fill(
+      thrust::device_pointer_cast(out_scores_ptr + indices.size()), 
+      thrust::device_pointer_cast(out_scores_ptr + _top_n * batch), 0);
   }
 
   return 0;
