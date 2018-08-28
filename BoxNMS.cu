@@ -56,12 +56,12 @@ void nms(const thrust::device_vector<float>::iterator& scores_begin,
     thrust::transform(boxes.begin(), boxes.end(), overlap.begin(),
       [=] __device__ (float4 box) {
         float4 it = *(boxes_begin + last);
-        float xx1 = max(it.x, box.x);
-        float yy1 = max(it.y, box.y);
-        float xx2 = min(it.x + it.z, box.x + box.z);
-        float yy2 = min(it.y + it.w, box.y + box.w);
-        float inter = (xx2 - xx1 + 1) * (yy2 - yy1 + 1);
-        float area = box.z * box.w;
+        float x1 = max(it.x, box.x);
+        float y1 = max(it.y, box.y);
+        float x2 = min(it.z, box.z);
+        float y2 = min(it.w, box.w);
+        float inter = (x2 - x1 + 1) * (y2 - y1 + 1);
+        float area = (box.z - box.x + 1) * (box.w - box.y + 1);
         return inter / area;
       });
 

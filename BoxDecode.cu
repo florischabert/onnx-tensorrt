@@ -46,28 +46,33 @@ int BoxDecodePlugin::initialize() {
   return 0;
 }
 
+std::ostream& operator<<(std::ostream& os, float4 v) {
+  os << "(" << v.x << "," << v.y << "," << v.z << "," << v.w << ")";
+  return os;
+}
+
 int BoxDecodePlugin::enqueue(int batchSize,
-                             const void *const *inputs, void **outputs,
-                             void *workspace, cudaStream_t stream) {
+                            const void *const *inputs, void **outputs,
+                            void *workspace, cudaStream_t stream) {
   auto const& scores_dims = this->getInputDims(0);
   auto const& boxes_dims = this->getInputDims(1);
   size_t height = scores_dims.d[1];
   size_t width = scores_dims.d[2];
   size_t num_anchors = boxes_dims.d[0] / 4; 
-  size_t num_classes = boxes_dims.d[0] / num_anchors;
+  size_t num_classes = scores_dims.d[0] / num_anchors;
   size_t scores_size = num_anchors * num_classes * height * width;
 
   for( int batch = 0; batch < batchSize; batch++ ) {
     size_t in_offset = batch * scores_size;
     auto scores_ptr = static_cast<const float *>(inputs[0]) + in_offset;
-    auto boxes_ptr = static_cast<const float4 *>(inputs[1]) + in_offset / num_classes;
+    auto boxes_ptr = static_cast<const float *>(inputs[1]) + in_offset / num_classes;
 
     size_t out_offset = batch * _top_n;
     auto out_scores_ptr = static_cast<float *>(outputs[0]) + out_offset;
     auto out_boxes_ptr = static_cast<float4 *>(outputs[1]) + out_offset;
     auto out_classes_ptr = static_cast<float *>(outputs[2]) + out_offset;
   
-    // // Filter scores above threshold 
+    // Filter scores above threshold 
     thrust::device_vector<int> indices(scores_size);
     auto last_idx = thrust::copy_if(
       thrust::make_counting_iterator<int>(0),
@@ -89,10 +94,24 @@ int BoxDecodePlugin::enqueue(int batchSize,
       std::min(indices.size(), static_cast<size_t>(_top_n)));
     scores.resize(indices.size());
 
+    if (width != 160) return 0;
+
     // Gather boxes
     thrust::device_vector<float4> boxes(indices.size());
-    thrust::gather(indices.begin(), indices.end(),
-      thrust::device_pointer_cast(boxes_ptr), boxes.begin());
+    auto boxes_ptr_d = thrust::raw_pointer_cast(boxes_ptr);
+    thrust::transform(
+      indices.begin(), indices.end(), boxes.begin(),
+      [=, scale=_scale] __device__ (int i) { 
+        int x = i % width;
+        int y = (i / width) % height;
+        int a = i / num_classes / height / width;
+        return float4{
+          *(boxes_ptr_d + ((a * 4 + 0) * height + y) * width + x),
+          *(boxes_ptr_d + ((a * 4 + 1) * height + y) * width + x),
+          *(boxes_ptr_d + ((a * 4 + 2) * height + y) * width + x),
+          *(boxes_ptr_d + ((a * 4 + 3) * height + y) * width + x)
+        };
+      });
 
     // Infer classes
     thrust::device_vector<float> classes(indices.size());
@@ -109,8 +128,29 @@ int BoxDecodePlugin::enqueue(int batchSize,
           float y = ((i / width)  % height) * scale;
           int a = (i / num_classes / height / width) % num_anchors;
           float *d = anchors_ptr_d + 4*a;
-          return float4{x+d[0]+b.x, y+d[1]+b.y, x+d[2]+b.z, y+d[3]+b.w};
+          
+          float x1 = x + d[0];
+          float y1 = y + d[1];
+          float x2 = x + d[2];
+          float y2 = y + d[3];
+          float w = x2 - x1 + 1.0f;
+          float h = y2 - y1 + 1.0f;
+          float pred_ctr_x = b.x * w + x1 + 0.5f * w;
+          float pred_ctr_y = b.y * h + y1 + 0.5f * h;
+          float pred_w = exp(b.z) * w;
+          float pred_h = exp(b.w) * h;
+
+          return float4{
+            max(0.0f, pred_ctr_x - 0.5f * pred_w),
+            max(0.0f, pred_ctr_y - 0.5f * pred_h),
+            min(pred_ctr_x + 0.5f * pred_w - 1.0f, width * scale - 1.0f),
+            min(pred_ctr_y + 0.5f * pred_h - 1.0f, height * scale - 1.0f)
+          };
         });
+
+      // std::cout << "Modified boxes " << width << "x" << height << std::endl;
+      // thrust::copy(boxes.begin(), boxes.end(), std::ostream_iterator<float4>(std::cout, " "));
+      // std::cout << std::endl; 
     }
 
     // Copy to output
