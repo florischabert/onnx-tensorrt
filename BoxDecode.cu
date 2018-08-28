@@ -94,8 +94,6 @@ int BoxDecodePlugin::enqueue(int batchSize,
       std::min(indices.size(), static_cast<size_t>(_top_n)));
     scores.resize(indices.size());
 
-    if (width != 160) return 0;
-
     // Gather boxes
     thrust::device_vector<float4> boxes(indices.size());
     auto boxes_ptr_d = thrust::raw_pointer_cast(boxes_ptr);
@@ -116,7 +114,9 @@ int BoxDecodePlugin::enqueue(int batchSize,
     // Infer classes
     thrust::device_vector<float> classes(indices.size());
     thrust::transform(indices.begin(), indices.end(), classes.begin(),
-      (thrust::placeholders::_1 / height / width) % num_classes);
+      [=] __device__ (int i) {
+        return (int)((i / height / width) % num_classes);
+      });
 
     if( !_anchors.empty() ) {
       // Add anchors offsets to deltas
@@ -147,10 +147,6 @@ int BoxDecodePlugin::enqueue(int batchSize,
             min(pred_ctr_y + 0.5f * pred_h - 1.0f, height * scale - 1.0f)
           };
         });
-
-      // std::cout << "Modified boxes " << width << "x" << height << std::endl;
-      // thrust::copy(boxes.begin(), boxes.end(), std::ostream_iterator<float4>(std::cout, " "));
-      // std::cout << std::endl; 
     }
 
     // Copy to output

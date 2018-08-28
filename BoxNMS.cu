@@ -39,20 +39,20 @@ void nms(const thrust::device_vector<float>::iterator& scores_begin,
     thrust::make_counting_iterator<int>(0),
     thrust::make_counting_iterator<int>(count),
     indices.begin());
-  thrust::sort_by_key(scores_begin, scores_end, indices.begin(),
-    thrust::greater<float>());
 
-  thrust::device_vector<int> keep(0);
+  thrust::device_vector<float> scores(count);
+  thrust::copy(scores_begin, scores_end, scores.begin());
+  thrust::sort_by_key(scores.begin(), scores.end(), indices.begin());
+
   while( !indices.empty() ) {
     auto last = indices.back();
-    keep.push_back(last);
 
     // Compute boxes intersection
     thrust::device_vector<float4> boxes(indices.size() - 1);
     thrust::gather(
       indices.begin(), indices.end() - 1, boxes_begin, boxes.begin());
 
-    thrust::device_vector<float> overlap(indices.size() - 1);
+    thrust::device_vector<float> overlap(boxes.size());
     thrust::transform(boxes.begin(), boxes.end(), overlap.begin(),
       [=] __device__ (float4 box) {
         float4 it = *(boxes_begin + last);
@@ -60,9 +60,10 @@ void nms(const thrust::device_vector<float>::iterator& scores_begin,
         float y1 = max(it.y, box.y);
         float x2 = min(it.z, box.z);
         float y2 = min(it.w, box.w);
-        float inter = (x2 - x1 + 1) * (y2 - y1 + 1);
+        float w = max(0.0f, x2 - x1 + 1);
+        float h = max(0.0f, y2 - y1 + 1);
         float area = (box.z - box.x + 1) * (box.w - box.y + 1);
-        return inter / area;
+        return (w * h) / area;
       });
 
     indices.pop_back();
@@ -129,12 +130,12 @@ int BoxNMSPlugin::enqueue(int batchSize,
       indices.begin(),
       thrust::placeholders::_1 > 0);
     indices.resize(thrust::distance(indices.begin(), last_idx));
-  
+
     // Sort by class
     thrust::device_vector<float> classes(indices.size());
     thrust::gather(indices.begin(), indices.end(),
       thrust::device_pointer_cast(classes_ptr), classes.begin());
-
+  
     thrust::sort_by_key(classes.begin(), classes.end(), indices.begin());
 
     // Gather scores, boxes
@@ -156,7 +157,7 @@ int BoxNMSPlugin::enqueue(int batchSize,
       auto end = thrust::distance(classes.begin(), class_end);
       nms(scores.begin() + begin, scores.begin() + end, 
         boxes.begin() + begin, _nms_thresh);
-
+      
       class_begin = class_end;
     }
 
